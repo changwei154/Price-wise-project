@@ -39,6 +39,13 @@ def load_product_catalog():
                         }
                     except (TypeError, ValueError):
                         continue
+                    if (
+                        product["transaction_rows"] <= 0
+                        or not all(math.isfinite(product[key]) and product[key] > 0 for key in ("median_price", "min_price", "max_price"))
+                        or product["min_price"] > product["median_price"]
+                        or product["median_price"] > product["max_price"]
+                    ):
+                        continue
                     products[name.casefold()] = product
             return products
     except (OSError, csv.Error, KeyError):
@@ -50,6 +57,7 @@ PRODUCT_CATALOG = [
     item["product_name"]
     for item in sorted(PRODUCT_REFERENCE.values(), key=lambda p: (-p["transaction_rows"], p["product_name"].casefold()))
 ]
+PRODUCT_SEARCH_INDEX = [(name, name.casefold()) for name in PRODUCT_CATALOG]
 
 
 def safe_float(values, key, default=None):
@@ -87,7 +95,7 @@ header {{ background:#fff; border-bottom:1px solid var(--line); }} .top {{ max-w
 main {{ max-width:1040px; margin:38px auto; padding:0 24px 48px; }} .intro {{ margin-bottom:24px; }} h1 {{ font-size:clamp(28px,4vw,38px); line-height:1.1; letter-spacing:-1px; margin:0 0 9px; }}
 p {{ margin:0 0 12px; }} .sub {{ color:var(--muted); max-width:680px; }} .layout {{ display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,.8fr); gap:20px; align-items:start; }}
 .card {{ background:#fff; border:1px solid var(--line); border-radius:16px; padding:22px; box-shadow:0 5px 18px #1b38200a; }} h2 {{ font-size:18px; margin:0 0 16px; letter-spacing:-.3px; }} .section {{ padding-bottom:18px; margin-bottom:18px; border-bottom:1px solid var(--line); }}
-.section:last-child {{ border-bottom:0; padding:0; margin:0; }} label {{ display:flex; align-items:center; gap:6px; font-size:13px; font-weight:650; margin:0 0 6px; }} input,select {{ width:100%; border:1px solid #d5dfd9; border-radius:9px; background:white; color:var(--ink); padding:11px 12px; font:inherit; outline:none; }}
+.section:last-child {{ border-bottom:0; padding:0; margin:0; }} label {{ display:block; font-size:13px; font-weight:650; margin:0 0 6px; }} .label-line {{ display:flex; align-items:center; gap:6px; margin:0 0 6px; }} .label-line label {{ margin:0; }} input,select {{ width:100%; border:1px solid #d5dfd9; border-radius:9px; background:white; color:var(--ink); padding:11px 12px; font:inherit; outline:none; }}
 input:focus,select:focus {{ border-color:var(--green); box-shadow:0 0 0 3px #176b501a; }} .grid2 {{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }} .field {{ margin-bottom:13px; }} .hint {{ color:var(--muted); font-size:12px; margin-top:5px; }}
 .help-button {{ position:relative; display:inline-grid; place-items:center; flex:none; width:16px; height:16px; border:1px solid #78958a; border-radius:50%; padding:0; background:#fff; color:var(--green); font:inherit; font-size:11px; line-height:1; cursor:help; }}
 .help-popover {{ display:none; position:absolute; z-index:10; left:50%; bottom:calc(100% + 8px); transform:translateX(-50%); width:220px; padding:10px 12px; border-radius:9px; background:#182522; color:white; font-size:12px; font-weight:450; line-height:1.45; text-align:left; box-shadow:0 6px 18px #18252230; }}
@@ -120,13 +128,13 @@ def render_form(values, error=""):
 <div class="intro"><h1>Understand your product pricing</h1><p class="sub">Enter a few details to see your margin, compare prices, and get clear guidance. Start with a demo if you want to explore first.</p></div>
 <div class="layout"><section class="card"><div class="result-title"><h2>Product details</h2><button class="mini-button" id="load-example" type="button">Load example</button></div><p class="hint">Example costs and prices are illustrative; replace them with your figures.</p>{error_box}
 <form method="post" action="/">
-<div class="section"><div class="field"><label for="product">Product name {help_tip('product', 'Product name', 'Choose a name from the historical product list, or type your own. The product list does not provide unit costs.')}</label><div class="picker"><input id="product" name="product" autocomplete="off" aria-autocomplete="list" aria-controls="product-menu" aria-expanded="false" placeholder="Click to browse or type to search" value="{html.escape(values.get('product',[''])[0], quote=True)}" required><div id="product-menu" class="picker-menu" role="listbox" hidden></div></div><div class="hint">Search {len(PRODUCT_CATALOG):,} item descriptions from Online Retail.xlsx, or type your own product. The dataset has names and sales prices, but no unit costs.</div></div>
-<div class="grid2"><div class="field"><label for="cost">Your unit cost {help_tip('cost', 'Unit cost', 'Enter what you pay to buy or make one unit. Keep it in the same currency as your selling price. Fixed costs go in the separate field.')}</label><input id="cost" name="cost" type="number" min="0" step="0.01" placeholder="e.g. 12.00" value="{html.escape(values.get('cost',[''])[0], quote=True)}" required><div class="hint">What you pay to buy or make one unit.</div></div><div class="field"><label for="price">Your current selling price {help_tip('price', 'Current selling price', 'Enter the amount customers pay for one unit. Use the same currency as unit cost. Taxes and fees are not added automatically.')}</label><input id="price" name="price" type="number" min="0" step="0.01" placeholder="e.g. 25.00" value="{html.escape(values.get('price',[''])[0], quote=True)}" required></div></div>
-<div class="grid2"><div class="field"><label for="fixed">Fixed costs (optional) {help_tip('fixed', 'Fixed costs', 'Enter total fixed costs for the same period as the units sold, such as monthly rent. These costs do not change directly with the number of units.')}</label><input id="fixed" name="fixed" type="number" step="0.01" placeholder="e.g. 500.00" value="{html.escape(values.get('fixed',[''])[0], quote=True)}"><div class="hint">Total fixed costs for the same period as sales.</div></div><div class="field"><label for="volume">Units sold in that period {help_tip('volume', 'Units sold', 'Enter the number of units sold during the period covered by your fixed costs. For example, pair monthly units with monthly fixed costs.')}</label><input id="volume" name="volume" type="number" min="0" step="1" placeholder="e.g. 100" value="{html.escape(values.get('volume',[''])[0], quote=True)}" required></div></div>
-<div class="field"><label for="target">Target gross margin (%) {help_tip('target', 'Target gross margin', 'This is your review threshold, not a markup. Gross margin is (selling price - unit cost) divided by selling price. The default 25% is only an example.')}</label><input id="target" name="target" type="number" min="0" max="90" step="1" value="{html.escape(values.get('target',['25'])[0], quote=True)}"><div class="hint">A review threshold you set; 25% is only a starting example.</div></div>
-<div class="field"><label for="currency">Display currency {help_tip('currency', 'Display currency', 'This changes the currency symbol shown next to results. It does not convert the values you entered or the sample dataset prices.')}</label><select id="currency" name="currency">{''.join(f'<option value="{s}"{" selected" if currency == s else ""}>{s}</option>' for s in ('€','$','£','R$'))}</select><div class="hint">Changes the symbol only; it does not convert prices.</div></div></div>
-<div class="section"><div class="field"><label for="source">Compare prices {help_tip('source', 'Price comparison source', 'Enter competitor prices for a current market comparison, or view historical selling prices recorded for the exact item selected above. Historical item prices are not competitor prices.')}</label><select id="source" name="source"><option value="manual"{' selected' if source == 'manual' else ''}>I will enter competitor prices</option><option value="historical"{' selected' if source == 'historical' else ''}>Show this item's historical prices</option></select></div>
-<div id="manual-market" class="field"><label for="competitors">Competitor prices {help_tip('competitors', 'Competitor prices', 'Enter one or more prices separated by commas. Compare similar products and make sure the currency and product size or unit match.')}</label><input id="competitors" name="competitors" placeholder="e.g. 22.50, 24.00, 27.99" value="{html.escape(values.get('competitors',[''])[0], quote=True)}"><div class="hint">Enter one or more prices, separated by commas.</div></div>
+<div class="section"><div class="field"><div class="label-line"><label for="product">Product name</label>{help_tip('product', 'Product name', 'Choose a name from the historical product list, or type your own. The product list does not provide unit costs.')}</div><div class="picker"><input id="product" name="product" autocomplete="off" aria-autocomplete="list" aria-controls="product-menu" aria-expanded="false" placeholder="Click to browse or type to search" value="{html.escape(values.get('product',[''])[0], quote=True)}" required><div id="product-menu" class="picker-menu" role="listbox" hidden></div></div><div class="hint">Search {len(PRODUCT_CATALOG):,} item descriptions from Online Retail.xlsx, or type your own product. The dataset has names and sales prices, but no unit costs.</div></div>
+<div class="grid2"><div class="field"><div class="label-line"><label for="cost">Your unit cost</label>{help_tip('cost', 'Unit cost', 'Enter what you pay to buy or make one unit. Keep it in the same currency as your selling price. Fixed costs go in the separate field.')}</div><input id="cost" name="cost" type="number" min="0" step="0.01" placeholder="e.g. 12.00" value="{html.escape(values.get('cost',[''])[0], quote=True)}" required><div class="hint">What you pay to buy or make one unit.</div></div><div class="field"><div class="label-line"><label for="price">Your current selling price</label>{help_tip('price', 'Current selling price', 'Enter the amount customers pay for one unit. Use the same currency as unit cost. Taxes and fees are not added automatically.')}</div><input id="price" name="price" type="number" min="0" step="0.01" placeholder="e.g. 25.00" value="{html.escape(values.get('price',[''])[0], quote=True)}" required></div></div>
+<div class="grid2"><div class="field"><div class="label-line"><label for="fixed">Fixed costs (optional)</label>{help_tip('fixed', 'Fixed costs', 'Enter total fixed costs for the same period as the units sold, such as monthly rent. These costs do not change directly with the number of units.')}</div><input id="fixed" name="fixed" type="number" step="0.01" placeholder="e.g. 500.00" value="{html.escape(values.get('fixed',[''])[0], quote=True)}"><div class="hint">Total fixed costs for the same period as sales.</div></div><div class="field"><div class="label-line"><label for="volume">Units sold in that period</label>{help_tip('volume', 'Units sold', 'Enter the number of units sold during the period covered by your fixed costs. For example, pair monthly units with monthly fixed costs.')}</div><input id="volume" name="volume" type="number" min="0" step="1" placeholder="e.g. 100" value="{html.escape(values.get('volume',[''])[0], quote=True)}" required></div></div>
+<div class="field"><div class="label-line"><label for="target">Target gross margin (%)</label>{help_tip('target', 'Target gross margin', 'This is your review threshold, not a markup. Gross margin is (selling price - unit cost) divided by selling price. The default 25% is only an example.')}</div><input id="target" name="target" type="number" min="0" max="90" step="1" value="{html.escape(values.get('target',['25'])[0], quote=True)}"><div class="hint">A review threshold you set; 25% is only a starting example.</div></div>
+<div class="field"><div class="label-line"><label for="currency">Display currency</label>{help_tip('currency', 'Display currency', 'This changes the currency symbol shown next to results. It does not convert your input values or historical sample prices.')}</div><select id="currency" name="currency">{''.join(f'<option value="{s}"{" selected" if currency == s else ""}>{s}</option>' for s in ('€','$','£','R$'))}</select><div class="hint">Changes the symbol only; it does not convert prices.</div></div></div>
+<div class="section"><div class="field"><div class="label-line"><label for="source">Compare prices</label>{help_tip('source', 'Price comparison source', 'Enter competitor prices for a current market comparison, or view historical selling prices recorded for the exact item selected above. Historical item prices are not competitor prices.')}</div><select id="source" name="source"><option value="manual"{' selected' if source == 'manual' else ''}>I will enter competitor prices</option><option value="historical"{' selected' if source == 'historical' else ''}>Show this item's historical prices</option></select></div>
+<div id="manual-market" class="field"><div class="label-line"><label for="competitors">Competitor prices</label>{help_tip('competitors', 'Competitor prices', 'Enter one or more prices separated by commas. Compare similar products and make sure the currency and product size or unit match.')}</div><input id="competitors" name="competitors" placeholder="e.g. 22.50, 24.00, 27.99" value="{html.escape(values.get('competitors',[''])[0], quote=True)}"><div class="hint">Enter one or more prices, separated by commas.</div></div>
 <div id="historical-market" class="notice">Shows the recorded selling-price median and range for the exact item selected above, using UK transaction data from 2010–2011. This is historical sales data, not competitor pricing or a current market quote. For a true competitor comparison, enter prices manually.</div>
 <div class="notice">Competitor prices help with comparison. They do not tell us what customers will buy.</div></div>
 <input type="hidden" name="analyze" value="1"><button class="button" type="submit">Show my pricing guidance</button></form></section>
@@ -152,10 +160,11 @@ def render_price_chart(price, cost, currency, benchmark=None, benchmark_label=""
             f'<span class="chart-fill {color}" style="width:{width:.2f}%"></span></div></div>'
         )
     description = "; ".join(f"{label}: {money(value, currency)}" for label, value, _ in rows)
+    note = "The reference bar is historical or user-entered; it is not a demand prediction." if benchmark is not None else "Compare your selling price with the cost of one unit."
     return (
         f'<div class="price-chart" role="img" aria-label="Bar chart. {html.escape(description, quote=True)}">'
         '<h3>Price comparison per unit</h3>'
-        '<p class="chart-note">Each bar uses the same scale. The blue bar is a reference, not a demand prediction.</p>'
+        f'<p class="chart-note">Each bar uses the same scale. {note}</p>'
         f'{"".join(bars)}<div class="chart-axis"><span>{money(0, currency)}</span>'
         f'<span>{money(scale_max, currency)}</span></div></div>'
     )
@@ -165,14 +174,24 @@ def render_results(values):
     product = values.get("product", [""])[0].strip() or "Your product"
     cost = safe_float(values, "cost")
     price = safe_float(values, "price")
-    fixed = safe_float(values, "fixed", 0) or 0
+    fixed_raw = values.get("fixed", [""])[0].strip()
+    fixed = 0.0 if not fixed_raw else safe_float(values, "fixed")
     volume = safe_float(values, "volume")
-    target_pct = safe_float(values, "target", 25)
+    target_raw = values.get("target", [""])[0].strip()
+    target_pct = 25.0 if not target_raw else safe_float(values, "target")
     currency = values.get("currency", ["€"])[0]
-    if cost is None or price is None or volume is None or cost < 0 or price <= 0 or volume < 0 or fixed < 0 or target_pct is None or not 0 <= target_pct < 100:
-        raise ValueError("Enter valid positive prices, costs, and sales volume. Target margin must be between 0 and 99%.")
+    if (
+        cost is None or price is None or volume is None or fixed is None or target_pct is None
+        or cost < 0 or price <= 0 or volume < 0 or not volume.is_integer() or fixed < 0
+        or target_pct < 0 or target_pct > 90
+        or max(cost, price, fixed, volume) > 1_000_000_000_000
+        or currency not in ("€", "$", "£", "R$")
+    ):
+        raise ValueError("Enter a valid price, non-negative costs, and a whole-number sales volume. Target margin must be between 0 and 90%.")
 
     source = values.get("source", ["manual"])[0]
+    if source not in ("manual", "historical"):
+        raise ValueError("Choose a valid price comparison source.")
     competitor_prices = []
     historical = None
     source_note = "Competitor prices entered by you"
@@ -196,7 +215,7 @@ def render_results(values):
         if raw.strip():
             try:
                 competitor_prices = [float(part.strip()) for part in raw.split(",") if part.strip()]
-                if any(not math.isfinite(n) or n <= 0 for n in competitor_prices):
+                if any(not math.isfinite(n) or n <= 0 or n > 1_000_000_000_000 for n in competitor_prices):
                     raise ValueError
             except ValueError:
                 raise ValueError("Competitor prices must be positive numbers separated by commas.")
@@ -252,18 +271,25 @@ class PriceWiseHandler(BaseHTTPRequestHandler):
         request = urlparse(self.path)
         if request.path == "/products":
             query = parse_qs(request.query).get("q", [""])[0].strip().casefold()
-            matches = [name for name in PRODUCT_CATALOG if not query or query in name.casefold()][:30]
+            query = query[:120]
+            matches = [name for name, folded_name in PRODUCT_SEARCH_INDEX if not query or query in folded_name][:30]
             self.send_body(json.dumps(matches, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
             return
         if request.path == "/app.js":
             self.send_body(APP_JS.encode("utf-8"), "text/javascript; charset=utf-8")
+            return
+        if request.path == "/favicon.ico":
+            self.send_body(b"", "image/x-icon", status=204)
+            return
+        if request.path != "/":
+            self.send_body(b"Not found", "text/plain; charset=utf-8", status=404)
             return
         self.send_body(page(render_form({})).encode("utf-8"), "text/html; charset=utf-8")
 
     def do_POST(self):
         try:
             size = int(self.headers.get("Content-Length", "0"))
-            if size > 200_000:
+            if size <= 0 or size > 200_000:
                 raise ValueError
             payload = self.rfile.read(size).decode("utf-8")
             values = parse_qs(payload, keep_blank_values=True)
@@ -272,13 +298,16 @@ class PriceWiseHandler(BaseHTTPRequestHandler):
             content = render_form({}, error="Please check the values and try again.")
         self.send_body(content.encode("utf-8"), "text/html; charset=utf-8")
 
-    def send_body(self, body, content_type):
-        self.send_response(200)
+    def send_body(self, body, content_type, status=200):
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
+        if status != 204:
+            self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(body)
+        if body and status != 204:
+            self.wfile.write(body)
 
     def log_message(self, format, *args):
         print(f"{self.address_string()} - {format % args}")
@@ -290,6 +319,7 @@ const manualGroup = document.getElementById('manual-market');
 const historicalGroup = document.getElementById('historical-market');
 const productInput = document.getElementById('product');
 const productMenu = document.getElementById('product-menu');
+let productSearchRequest = 0;
 
 function updateCompetitorFields() {
   const useHistory = sourceSelect.value === 'historical';
@@ -298,14 +328,18 @@ function updateCompetitorFields() {
 }
 
 function closeProductMenu() {
+  productSearchRequest += 1;
   productMenu.hidden = true;
   productInput.setAttribute('aria-expanded', 'false');
 }
 
 async function showProductMatches(query) {
+  const requestNumber = ++productSearchRequest;
   try {
     const response = await fetch('/products?q=' + encodeURIComponent(query));
+    if (!response.ok) throw new Error('Product search failed');
     const products = await response.json();
+    if (requestNumber !== productSearchRequest) return;
     productMenu.replaceChildren();
     if (!products.length) {
       const empty = document.createElement('div');
@@ -350,6 +384,7 @@ async function showProductMatches(query) {
     productMenu.hidden = false;
     productInput.setAttribute('aria-expanded', 'true');
   } catch (_) {
+    if (requestNumber !== productSearchRequest) return;
     productMenu.replaceChildren();
     const message = document.createElement('div');
     message.className = 'picker-status';
