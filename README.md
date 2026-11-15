@@ -39,7 +39,7 @@ python pricewise_5.py
 On Windows, you can also use the existing virtual environment:
 
 ```powershell
-.\.venv\Scripts\python.exe pricewise.py
+.\.venv\Scripts\python.exe pricewise_5.py
 ```
 
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser. Keep the terminal open while using the website. Press `Ctrl+C` to stop it.
