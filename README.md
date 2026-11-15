@@ -33,7 +33,7 @@ This is an early-stage group project prototype. Results are estimates based on u
 Open a terminal in the project folder and run:
 
 ```bash
-python pricewise.py
+python pricewise_5.py
 ```
 
 On Windows, you can also use the existing virtual environment:
