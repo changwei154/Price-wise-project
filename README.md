@@ -46,7 +46,7 @@ Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser. Keep the te
 
 ## Design
 
-The original `pricewise.py` file has been updated with a redesigned interface. The redesigned version is saved as **`PriceWise_5`**.
+The original `pricewise.py` file has been updated with a redesigned interface. The redesigned version is saved as **`pricewise_5.py`**.
 
 ## Sample Data
 
