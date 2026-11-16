@@ -10,13 +10,16 @@ import csv
 import html
 import json
 import math
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+import webbrowser
 
 
 ROOT = Path(__file__).resolve().parent
 PRODUCT_FILE = ROOT / "dataset" / "product_catalog.csv"
+DEMAND_FILE = ROOT / "dataset" / "retail_price.csv"
 HOST, PORT = "127.0.0.1", 8000
 
 
@@ -58,6 +61,24 @@ PRODUCT_CATALOG = [
     for item in sorted(PRODUCT_REFERENCE.values(), key=lambda p: (-p["transaction_rows"], p["product_name"].casefold()))
 ]
 PRODUCT_SEARCH_INDEX = [(name, name.casefold()) for name in PRODUCT_CATALOG]
+
+
+def load_demand_categories():
+    """Load optional broad categories used only for the experimental model."""
+    try:
+        with DEMAND_FILE.open("r", encoding="utf-8-sig", newline="") as source:
+            return sorted(
+                {
+                    (row.get("product_category_name") or "").strip()
+                    for row in csv.DictReader(source)
+                    if (row.get("product_category_name") or "").strip()
+                }
+            )
+    except (OSError, csv.Error):
+        return []
+
+
+DEMAND_CATEGORIES = load_demand_categories()
 
 
 def safe_float(values, key, default=None):
@@ -136,7 +157,7 @@ input,select {{ width:100%; min-height:46px; padding:11px 13px; border:1px solid
 @media(max-width:760px) {{ .result-card {{ position:static; }} .metrics-grid {{ gap:8px; }} .metrics-grid .metric {{ padding:12px; }} .button {{ bottom:8px; }} }}
 @media(max-width:440px) {{ .metrics-grid {{ grid-template-columns:1fr 1fr; }} .metrics-grid .metric strong {{ font-size:19px; }} }}
 </style></head><body><header><div class="top"><div class="brand">Price<span>Wise</span></div><div class="tag">Simple pricing decisions, made clearer</div></div></header>
-<main>{content}<footer>PriceWise gives illustrative decision support. It does not predict demand or choose a guaranteed best price.</footer></main><script src="/app.js"></script></body></html>"""
+<main>{content}<footer>PriceWise gives illustrative decision support. Demand estimates are experimental and are not guaranteed forecasts.</footer></main><script src="/app.js"></script></body></html>"""
 
 
 def render_form(values, error=""):
@@ -163,6 +184,7 @@ def render_form(values, error=""):
 <div class="grid2"><div class="field"><div class="label-line"><label for="cost">Your unit cost</label>{help_tip('cost', 'Unit cost', 'Enter what you pay to buy or make one unit. Keep it in the same currency as your selling price. Fixed costs go in the separate field.')}</div><input id="cost" name="cost" type="number" min="0" step="0.01" placeholder="e.g. 12.00" value="{html.escape(values.get('cost',[''])[0], quote=True)}" required><div class="hint">What you pay to buy or make one unit.</div></div><div class="field"><div class="label-line"><label for="price">Your current selling price</label>{help_tip('price', 'Current selling price', 'Enter the amount customers pay for one unit. Use the same currency as unit cost. Taxes and fees are not added automatically.')}</div><input id="price" name="price" type="number" min="0" step="0.01" placeholder="e.g. 25.00" value="{html.escape(values.get('price',[''])[0], quote=True)}" required></div></div>
 <div class="grid2"><div class="field"><div class="label-line"><label for="fixed">Fixed costs (optional)</label>{help_tip('fixed', 'Fixed costs', 'Enter total fixed costs for the same period as the units sold, such as monthly rent. These costs do not change directly with the number of units.')}</div><input id="fixed" name="fixed" type="number" step="0.01" placeholder="e.g. 500.00" value="{html.escape(values.get('fixed',[''])[0], quote=True)}"><div class="hint">Total fixed costs for the same period as sales.</div></div><div class="field"><div class="label-line"><label for="volume">Units sold in that period</label>{help_tip('volume', 'Units sold', 'Enter the number of units sold during the period covered by your fixed costs. For example, pair monthly units with monthly fixed costs.')}</div><input id="volume" name="volume" type="number" min="0" step="1" placeholder="e.g. 100" value="{html.escape(values.get('volume',[''])[0], quote=True)}" required></div></div>
 <div class="field"><div class="label-line"><label for="target">Target gross margin (%)</label>{help_tip('target', 'Target gross margin', 'This is your review threshold, not a markup. Gross margin is (selling price - unit cost) divided by selling price. The default 25% is only an example.')}</div><input id="target" name="target" type="number" min="0" max="90" step="1" value="{html.escape(values.get('target',['25'])[0], quote=True)}"><div class="hint">A review threshold you set; 25% is only a starting example.</div></div>
+<div class="field"><div class="label-line"><label for="demand_category">Optional demand estimate category</label>{help_tip('demand_category', 'Demand estimate category', 'Optional: choose the broad category that best fits your product. The estimate comes from a separate, small 2017–2018 dataset and is not an exact product match.')}</div><select id="demand_category" name="demand_category"><option value="">Skip experimental estimate</option>{''.join(f'<option value="{html.escape(category, quote=True)}"{" selected" if values.get("demand_category", [""])[0] == category else ""}>{html.escape(category.replace("_", " ").title())}</option>' for category in DEMAND_CATEGORIES)}</select><div class="hint">Optional. Adds a rough category-level sales estimate; it does not change your price recommendation.</div></div>
 <div class="field"><div class="label-line"><label for="currency">Display currency</label>{help_tip('currency', 'Display currency', 'This changes the currency symbol shown next to results. It does not convert your input values or historical sample prices.')}</div><select id="currency" name="currency">{''.join(f'<option value="{s}"{" selected" if currency == s else ""}>{s}</option>' for s in ('€','$','£','R$'))}</select><div class="hint">Changes the symbol only; it does not convert prices.</div></div></div>
 <div class="section"><div class="field"><div class="label-line"><label for="source">Compare prices</label>{help_tip('source', 'Price comparison source', 'Enter competitor prices for a current market comparison, or view historical selling prices recorded for the exact item selected above. Historical item prices are not competitor prices.')}</div><select id="source" name="source"><option value="manual"{' selected' if source == 'manual' else ''}>I will enter competitor prices</option><option value="historical"{' selected' if source == 'historical' else ''}>Show this item's historical prices</option></select></div>
 <div id="manual-market" class="field"><div class="label-line"><label for="competitors">Competitor prices</label>{help_tip('competitors', 'Competitor prices', 'Enter one or more prices separated by commas. Compare similar products and make sure the currency and product size or unit match.')}</div><input id="competitors" name="competitors" placeholder="e.g. 22.50, 24.00, 27.99" value="{html.escape(values.get('competitors',[''])[0], quote=True)}"><div class="hint">Enter one or more prices, separated by commas.</div></div>
@@ -201,6 +223,48 @@ def render_price_chart(price, cost, currency, benchmark=None, benchmark_label=""
     )
 
 
+def render_demand_estimate(category, current_price, target_price, currency):
+    """Show an optional ML estimate without changing the pricing advice."""
+    if not category:
+        return ""
+    if category not in DEMAND_CATEGORIES:
+        raise ValueError("Choose a demand-estimate category from the list, or skip it.")
+    try:
+        from demand_model import predict_monthly_demand
+
+        current_qty, metrics = predict_monthly_demand(
+            category, price_ratio=1.0, month=datetime.now().month
+        )
+        target_qty, _ = predict_monthly_demand(
+            category,
+            price_ratio=target_price / current_price,
+            month=datetime.now().month,
+        )
+    except ImportError:
+        return (
+            '<section class="price-chart"><h3>Optional ML demand estimate unavailable</h3>'
+            '<p class="chart-note">Install the packages in requirements.txt to enable this experimental estimate. '
+            'Your pricing guidance above is unaffected.</p></section>'
+        )
+    except (OSError, ValueError) as exc:
+        return (
+            '<section class="price-chart"><h3>Optional ML demand estimate unavailable</h3>'
+            f'<p class="chart-note">{html.escape(str(exc))} Your pricing guidance above is unaffected.</p></section>'
+        )
+
+    holdout_start = metrics["holdout_start"].strftime("%b %Y")
+    holdout_end = metrics["holdout_end"].strftime("%b %Y")
+    return f"""<section class="price-chart" aria-labelledby="demand-title">
+<h3 id="demand-title">Optional machine-learning demand estimate</h3>
+<p class="chart-note">Broad category: {html.escape(category.replace('_', ' ').title())}. These are experimental monthly unit estimates, not a guaranteed forecast.</p>
+<div class="metrics-grid">
+<div class="metric"><small>At your current price</small><strong>{current_qty:,.0f} units</strong><small>Estimated per month</small></div>
+<div class="metric"><small>At the target-margin price ({money(target_price, currency)})</small><strong>{target_qty:,.0f} units</strong><small>Estimated per month</small></div>
+</div>
+<div class="notice" style="margin-top:12px"><strong>Gradient Boosting validation across {metrics['folds']} future two-month periods ({holdout_start}–{holdout_end}):</strong> MAE {metrics['mae']:.1f} units and RMSE {metrics['rmse']:.1f} per product-month; R² {metrics['r2']:.2f}; WAPE-based score {100 - metrics['wape']:.1f}% (WAPE {metrics['wape']:.1f}%). The category-average baseline score was {100 - metrics['baseline_wape']:.1f}%. The WAPE-based score is a normalized error summary, not standard model accuracy. Lower MAE/RMSE/WAPE is better; R² closer to 1 is better. The sample is small and dates from 2017–2018, so use this as a project demonstration only. It does not alter the cost, margin, or competitor-based recommendation.</div>
+</section>"""
+
+
 def render_results(values):
     product = values.get("product", [""])[0].strip() or "Your product"
     cost = safe_float(values, "cost")
@@ -210,6 +274,7 @@ def render_results(values):
     volume = safe_float(values, "volume")
     target_raw = values.get("target", [""])[0].strip()
     target_pct = 25.0 if not target_raw else safe_float(values, "target")
+    demand_category = values.get("demand_category", [""])[0].strip()
     currency = values.get("currency", ["€"])[0]
     if (
         cost is None or price is None or volume is None or fixed is None or target_pct is None
@@ -283,6 +348,7 @@ def render_results(values):
     benchmark_card = f'<div class="metric"><small>{benchmark_label}</small><strong>{money(benchmark, currency)}</strong><small>{html.escape(benchmark_details)}</small></div>' if benchmark is not None else ""
     chart_reference_label = "Historical median (same item)" if source == "historical" else "Competitor average (manual)"
     price_chart = render_price_chart(price, cost, currency, benchmark, chart_reference_label if benchmark is not None else "")
+    demand_panel = render_demand_estimate(demand_category, price, target_price, currency)
     sample_warning = '<div class="notice" style="margin-top:12px">These exact-item sales records are historical (2010–2011), not competitor prices or current market quotes. The workbook has no explicit currency field; the selected symbol does not convert values. Confirm the currency before comparing.</div>' if source == "historical" else ""
     comparison_note = "Historical sales reference only; not a current competitor price." if source == "historical" else "Competitor prices are reference points, not demand forecasts."
     advice_html = "".join(f'<li><strong>{html.escape(headline)}</strong><details class="advice-detail"><summary>Calculation details</summary><small>{html.escape(explanation)}</small></details></li>' for headline, explanation in advice)
@@ -295,6 +361,7 @@ def render_results(values):
 </div>
 {price_chart}
 <h2 style="margin-top:20px">Recommendations</h2><ul class="advice">{advice_html}</ul>
+{demand_panel}
 <p class="hint" style="margin-top:15px">{html.escape(source_note)}. {comparison_note}</p>{sample_warning}
 <div class="notice" style="margin-top:12px">Calculations use your inputs. They exclude unentered fees, tax, shipping, overhead, and customer response.</div></div>"""
 
@@ -474,6 +541,38 @@ if (exampleButton) {
 
 
 if __name__ == "__main__":
-    print(f"PriceWise is ready at http://{HOST}:{PORT}")
-    print("Press Ctrl+C in this window to stop the website.")
-    HTTPServer((HOST, PORT), PriceWiseHandler).serve_forever()
+    try:
+        from demand_model import trained_estimator
+
+        _, model_metrics = trained_estimator()
+        print("PriceWise Gradient Boosting validation (rolling future-month holdout):", flush=True)
+        print(
+            f"  MAE: {model_metrics['mae']:.2f} units | "
+            f"RMSE: {model_metrics['rmse']:.2f} units | "
+            f"R-squared: {model_metrics['r2']:.3f} | "
+            f"WAPE-based score: {100 - model_metrics['wape']:.1f}% | "
+            f"category-average baseline MAE: {model_metrics['baseline_mae']:.2f} units",
+            flush=True,
+        )
+    except Exception as exc:
+        print(
+            f"Demand model could not be loaded ({type(exc).__name__}: {exc}). "
+            "Check requirements.txt and the dataset; the pricing website can still run.",
+            flush=True,
+        )
+
+    server = None
+    for candidate_port in range(PORT, PORT + 11):
+        try:
+            server = HTTPServer((HOST, candidate_port), PriceWiseHandler)
+            break
+        except OSError:
+            continue
+    if server is None:
+        raise SystemExit(f"Could not start PriceWise on ports {PORT} through {PORT + 10}.")
+
+    server_url = f"http://{HOST}:{server.server_port}/"
+    print(f"PriceWise is ready at {server_url}", flush=True)
+    print("Opening it in your default browser. Press Ctrl+C to stop the website.", flush=True)
+    webbrowser.open(server_url)
+    server.serve_forever()

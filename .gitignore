@@ -8,3 +8,9 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Downloaded source datasets (do not commit large raw workbooks)
+dataset/online_retail_II.xlsx
+dataset/online_retail_II.zip
+dataset/online_retail_II_download/
+dataset/online_retail_II_monthly.csv
